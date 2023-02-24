@@ -1,0 +1,30 @@
+#!/bin/bash
+
+export DEBIAN_FRONTEND=noninteractive
+
+sudo apt update && sudo apt -y upgrade
+
+if ! which psql; then
+  sudo sh -c 'echo "deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
+  wget --quiet -O - https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo apt-key add -
+  sudo apt-get update; sudo apt install -y postgresql-14 postgresql-client-14 figlet;
+fi
+
+[ -d /dumps ] || mkdir /dumps && chown -R postgres:postgres /dumps
+cd /dumps
+
+gsutil cp gs://${google_storage_bucket.dumps.name}/${var.script_name}.sql .
+chown postgres:postgres ${var.script_name}.sql
+
+PGPASSWORD=${var.dbpass} pg_dump -h ${var.dbhost} -U ${var.username} -O ${var.dbname} ${var.exclude_tables} > ${var.dbname}.sql
+chown postgres:postgres ${var.dbname}.sql
+
+su -c "createdb ${var.dbname}" postgres
+su -c "psql ${var.dbname} < ${var.dbname}.sql" postgres
+su -c "psql ${var.dbname} < ${var.script_name}.sql" postgres
+su -c "pg_dump -O -Z 9 ${var.dbname} > anonymized-dump.sql.gz" postgres
+
+gsutil cp anonymized-dump.sql.gz gs://${google_storage_bucket.dumps.name}
+su -c "dropdb ${var.dbname}" postgres
+
+figlet -f bubble DONE! DONE! DONE!
